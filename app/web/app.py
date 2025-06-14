@@ -29,45 +29,45 @@ from app.web.log_parser import get_all_logs_info, get_latest_log_info, parse_log
 from app.web.thinking_tracker import ThinkingTracker
 
 
-# 控制是否自动打开浏览器 (读取环境变量，默认为True)
+# Controls whether to automatically open the browser (reads environment variable, defaults to True)
 AUTO_OPEN_BROWSER = os.environ.get("AUTO_OPEN_BROWSER", "1") == "1"
-last_opened = False  # 跟踪浏览器是否已打开
+last_opened = False  # Tracks if the browser has already been opened
 
 app = FastAPI(title="OpenManus Web")
 
-# 获取当前文件所在目录
+# Get the directory of the current file
 current_dir = Path(__file__).parent
-# 设置静态文件目录
+# Set the static files directory
 app.mount("/static", StaticFiles(directory=current_dir / "static"), name="static")
-# 设置模板目录
+# Set the templates directory
 templates = Jinja2Templates(directory=current_dir / "templates")
 
-# 存储活跃的会话及其结果
+# Stores active sessions and their results
 active_sessions: Dict[str, dict] = {}
 
-# 存储任务取消事件
+# Stores task cancellation events
 cancel_events: Dict[str, asyncio.Event] = {}
 
-# 创建工作区根目录
+# Create the workspace root directory
 WORKSPACE_ROOT = Path(__file__).parent.parent.parent / "workspace"
 WORKSPACE_ROOT.mkdir(exist_ok=True)
 
-# 日志目录
+# Logs directory
 LOGS_DIR = Path(__file__).parent.parent.parent / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 
-# 导入日志监视器
+# Import the log monitor
 from app.utils.log_monitor import LogFileMonitor
 
 
-# 存储活跃的日志监视器
+# Stores active log monitors
 active_log_monitors: Dict[str, LogFileMonitor] = {}
 
 
-# 创建工作区目录的函数
+# Function to create a workspace directory
 def create_workspace(session_id: str) -> Path:
-    """为会话创建工作区目录"""
-    # 简化session_id作为目录名
+    """Creates a workspace directory for a session."""
+    # Simplify the session_id to use as a directory name
     job_id = f"job_{session_id[:8]}"
     workspace_dir = WORKSPACE_ROOT / job_id
     workspace_dir.mkdir(exist_ok=True)
@@ -76,12 +76,12 @@ def create_workspace(session_id: str) -> Path:
 
 @app.on_event("startup")
 async def startup_event():
-    """启动事件：应用启动时自动打开浏览器"""
+    """Startup event: Automatically opens the browser when the application starts."""
     global last_opened
     if AUTO_OPEN_BROWSER and not last_opened:
-        # 延迟1秒以确保服务已经启动
+        # Delay for 1 second to ensure the service has started
         threading.Timer(1.0, lambda: webbrowser.open("http://localhost:8000")).start()
-        print("🌐 自动打开浏览器...")
+        print("🌐 Automatically opening browser...")
         last_opened = True
 
 
@@ -91,7 +91,7 @@ class SessionRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 async def get_home(request: Request):
-    """主页入口 - 使用connected界面"""
+    """Homepage endpoint - uses the connected interface."""
     return HTMLResponse(
         content=open(
             current_dir / "static" / "connected_interface.html", encoding="utf-8"
@@ -101,13 +101,13 @@ async def get_home(request: Request):
 
 @app.get("/original", response_class=HTMLResponse)
 async def get_original_interface(request: Request):
-    """原始界面入口"""
+    """Original interface endpoint."""
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/connected", response_class=HTMLResponse)
 async def get_connected_interface(request: Request):
-    """连接后端的新界面入口 (与主页相同)"""
+    """New interface endpoint connected to the backend (same as homepage)."""
     return HTMLResponse(
         content=open(
             current_dir / "static" / "connected_interface.html", encoding="utf-8"
@@ -127,10 +127,10 @@ async def create_chat_session(
         "workspace": None,
     }
 
-    # 创建取消事件
+    # Create a cancellation event
     cancel_events[session_id] = asyncio.Event()
 
-    # 创建工作区目录
+    # Create the workspace directory
     workspace_dir = create_workspace(session_id)
     active_sessions[session_id]["workspace"] = str(
         workspace_dir.relative_to(WORKSPACE_ROOT)
@@ -148,7 +148,7 @@ async def get_chat_result(session_id: str):
     if session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # 使用新的日志处理模块获取日志
+    # Use the new log handling module to get logs
     session = active_sessions[session_id]
     session["log"] = get_logs(session_id)
 
@@ -164,7 +164,7 @@ async def stop_processing(session_id: str):
         cancel_events[session_id].set()
 
     active_sessions[session_id]["status"] = "stopped"
-    active_sessions[session_id]["result"] = "处理已被用户停止"
+    active_sessions[session_id]["result"] = "Processing was stopped by the user"
 
     return {"status": "stopped"}
 
@@ -181,34 +181,34 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
         session = active_sessions[session_id]
 
-        # 注册 WebSocket 发送回调函数
+        # Register the WebSocket sending callback function
         async def ws_send(message: str):
             try:
                 await websocket.send_text(message)
             except Exception as e:
-                print(f"WebSocket 发送消息失败: {str(e)}")
+                print(f"Failed to send WebSocket message: {str(e)}")
 
         ThinkingTracker.register_ws_send_callback(session_id, ws_send)
 
-        # 初始状态通知中添加日志信息
+        # Add log information to the initial status notification
         await websocket.send_text(
             json.dumps(
                 {
                     "status": session["status"],
                     "log": session["log"],
                     "thinking_steps": ThinkingTracker.get_thinking_steps(session_id),
-                    "logs": ThinkingTracker.get_logs(session_id),  # 添加日志信息
+                    "logs": ThinkingTracker.get_logs(session_id),  # Add log information
                 }
             )
         )
 
-        # 获取工作区名称(job_id) - 优先从环境变量获取
+        # Get the workspace name (job_id) - prioritize environment variable
         job_id = None
-        # 首先检查当前会话的工作空间关联
+        # First, check the current session's workspace association
         if "workspace" in session:
             job_id = session["workspace"]
 
-        # 如果当前没有日志监控器，则创建一个
+        # If there's no log monitor currently, create one
         if session_id not in active_log_monitors and job_id:
             log_path = LOGS_DIR / f"{job_id}.log"
             if log_path.exists():
@@ -216,20 +216,20 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 log_monitor.start_monitoring()
                 active_log_monitors[session_id] = log_monitor
 
-        # 跟踪日志更新
+        # Track log updates
         last_log_entries = []
         if job_id and session_id in active_log_monitors:
             last_log_entries = active_log_monitors[session_id].get_log_entries()
 
-        # 等待结果更新
+        # Wait for result updates
         last_log_count = 0
         last_thinking_step_count = 0
-        last_tracker_log_count = 0  # 添加ThinkingTracker日志计数
+        last_tracker_log_count = 0  # Add ThinkingTracker log count
 
         while session["status"] == "processing":
-            await asyncio.sleep(0.2)  # 降低检查间隔提高实时性
+            await asyncio.sleep(0.2)  # Reduce the check interval to improve real-time performance
 
-            # 检查系统日志更新 (新增)
+            # Check for system log updates (new)
             if job_id and session_id in active_log_monitors:
                 current_log_entries = active_log_monitors[session_id].get_log_entries()
                 if len(current_log_entries) > len(last_log_entries):
@@ -239,14 +239,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             {
                                 "status": session["status"],
                                 "system_logs": new_logs,
-                                # 添加一个chat_logs字段，将系统日志作为聊天消息发送
+                                # Add a chat_logs field to send system logs as chat messages
                                 "chat_logs": new_logs,
                             }
                         )
                     )
                     last_log_entries = current_log_entries
 
-            # 检查日志更新
+            # Check for log updates
             current_log_count = len(session["log"])
             if current_log_count > last_log_count:
                 await websocket.send_text(
@@ -259,7 +259,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 )
                 last_log_count = current_log_count
 
-            # 检查思考步骤更新
+            # Check for thinking step updates
             thinking_steps = ThinkingTracker.get_thinking_steps(session_id)
             current_thinking_step_count = len(thinking_steps)
             if current_thinking_step_count > last_thinking_step_count:
@@ -273,7 +273,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 )
                 last_thinking_step_count = current_thinking_step_count
 
-            # 检查ThinkingTracker日志更新
+            # Check for ThinkingTracker log updates
             tracker_logs = ThinkingTracker.get_logs(session_id)
             current_tracker_log_count = len(tracker_logs)
             if current_tracker_log_count > last_tracker_log_count:
@@ -287,7 +287,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 )
                 last_tracker_log_count = current_tracker_log_count
 
-            # 检查结果更新
+            # Check for result updates
             if session["result"]:
                 await websocket.send_text(
                     json.dumps(
@@ -298,16 +298,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             "thinking_steps": ThinkingTracker.get_thinking_steps(
                                 session_id, last_thinking_step_count
                             ),
-                            "system_logs": last_log_entries,  # 添加系统日志
+                            "system_logs": last_log_entries,  # Add system logs
                             "logs": ThinkingTracker.get_logs(
                                 session_id, last_tracker_log_count
-                            ),  # 添加ThinkingTracker日志
+                            ),  # Add ThinkingTracker logs
                         }
                     )
                 )
-                break  # 结果已发送，退出循环，避免重复发送
+                break  # Result has been sent, exit the loop to avoid duplicate sending
 
-        # 仅在循环没有因result而break时才发送最终结果
+        # Only send the final result if the loop didn't break due to a result
         if not session["result"]:
             await websocket.send_text(
                 json.dumps(
@@ -318,82 +318,82 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         "thinking_steps": ThinkingTracker.get_thinking_steps(
                             session_id, last_thinking_step_count
                         ),
-                        "system_logs": last_log_entries,  # 添加系统日志
+                        "system_logs": last_log_entries,  # Add system logs
                         "logs": ThinkingTracker.get_logs(
                             session_id, last_tracker_log_count
-                        ),  # 添加ThinkingTracker日志
+                        ),  # Add ThinkingTracker logs
                     }
                 )
             )
 
-        # 取消注册 WebSocket 发送回调函数
+        # Unregister the WebSocket sending callback function
         ThinkingTracker.unregister_ws_send_callback(session_id)
         await websocket.close()
     except WebSocketDisconnect:
-        # 客户端断开连接，正常操作
+        # Client disconnected, normal operation
         ThinkingTracker.unregister_ws_send_callback(session_id)
     except Exception as e:
-        # 其他异常，记录日志但不中断应用
-        print(f"WebSocket错误: {str(e)}")
+        # Other exceptions, log the error but don't interrupt the application
+        print(f"WebSocket error: {str(e)}")
         ThinkingTracker.unregister_ws_send_callback(session_id)
 
 
-# 在适当位置添加LLM通信钩子
+# Add LLM communication hooks at the appropriate place
 from app.web.thinking_tracker import ThinkingTracker
 
 
-# 修改通信跟踪器的实现方式
+# Modify the communication tracker's implementation method
 class LLMCommunicationTracker:
-    """跟踪与LLM的通信内容，使用monkey patching代替回调"""
+    """Tracks communication with the LLM, using monkey-patching instead of callbacks."""
 
     def __init__(self, session_id: str, agent=None):
         self.session_id = session_id
         self.agent = agent
         self.original_run_method = None
 
-        # 如果提供了agent，安装钩子
+        # If an agent is provided, install hooks
         if agent and hasattr(agent, "llm") and hasattr(agent.llm, "completion"):
             self.install_hooks()
 
     def install_hooks(self):
-        """安装钩子以捕获LLM通信内容"""
+        """Installs hooks to capture LLM communication content."""
         if not self.agent or not hasattr(self.agent, "llm"):
             return False
 
-        # 保存原始方法
+        # Save the original method
         llm = self.agent.llm
         if hasattr(llm, "completion"):
             self.original_completion = llm.completion
-            # 替换为我们的包装方法
+            # Replace with our wrapper method
             llm.completion = self._wrap_completion(self.original_completion)
             return True
         return False
 
     def uninstall_hooks(self):
-        """卸载钩子，恢复原始方法"""
+        """Uninstalls hooks, restoring the original method."""
         if self.agent and hasattr(self.agent, "llm") and self.original_completion:
             self.agent.llm.completion = self.original_completion
 
     def _wrap_completion(self, original_method):
-        """包装LLM的completion方法以捕获输入和输出"""
+        """Wraps the LLM's completion method to capture input and output."""
         session_id = self.session_id
 
         async def wrapped_completion(*args, **kwargs):
-            # 记录输入
+            # Record input
             prompt = kwargs.get("prompt", "")
             if not prompt and args:
                 prompt = args[0]
             if prompt:
                 ThinkingTracker.add_communication(
                     session_id,
-                    "发送到LLM",
+                    "Sending to LLM",
                     prompt[:500] + ("..." if len(prompt) > 500 else ""),
                 )
 
-            # 调用原始方法
+            # Call the original method
             result = await original_method(*args, **kwargs)
 
-            # 记录输出
+            # Record output
             if result:
                 content = result
                 if isinstance(result, dict) and "content" in result:
@@ -404,7 +404,7 @@ class LLMCommunicationTracker:
                 if isinstance(content, str):
                     ThinkingTracker.add_communication(
                         session_id,
-                        "从LLM接收",
+                        "Receiving from LLM",
                         content[:500] + ("..." if len(content) > 500 else ""),
                     )
 
@@ -413,23 +413,23 @@ class LLMCommunicationTracker:
         return wrapped_completion
 
 
-# 导入新创建的LLM包装器
+# Import the newly created LLM wrapper
 from app.agent.llm_wrapper import LLMCallbackWrapper
 
 
-# 修改文件API，支持工作区目录
+# Modify file API to support workspace directories
 @app.get("/api/files")
 async def get_generated_files():
-    """获取所有工作区目录和文件"""
+    """Get all workspace directories and files."""
     result = []
 
-    # 获取所有工作区目录
+    # Get all workspace directories
     workspaces = list(WORKSPACE_ROOT.glob("job_*"))
     workspaces.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
     for workspace in workspaces:
         workspace_name = workspace.name
-        # 获取工作区内所有文件并按修改时间排序
+        # Get all files within the workspace and sort by modification time
         files = []
         with os.scandir(workspace) as it:
             for entry in it:
@@ -443,10 +443,10 @@ async def get_generated_files():
                     "json",
                 ]:
                     files.append(entry)
-        # 按修改时间倒序排序
+        # Sort by modification time in descending order
         files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
 
-        # 如果有文件，添加该工作区
+        # If there are files, add this workspace
         if files:
             workspace_item = {
                 "name": workspace_name,
@@ -455,7 +455,7 @@ async def get_generated_files():
                 "files": [],
             }
 
-            # 添加工作区下的文件
+            # Add files under the workspace
             for file in sorted(files, key=lambda p: p.name):
                 workspace_item["files"].append(
                     {
@@ -465,7 +465,7 @@ async def get_generated_files():
                                 Path(__file__).parent.parent.parent
                             )
                         ),
-                        "type": Path(file.path).suffix[1:],  # 去掉.的扩展名
+                        "type": Path(file.path).suffix[1:],  # Remove the dot from the extension
                         "size": file.stat().st_size,
                         "modified": file.stat().st_mtime,
                     }
@@ -476,10 +476,10 @@ async def get_generated_files():
     return {"workspaces": result}
 
 
-# 新增日志文件接口
+# New log file API
 @app.get("/api/logs")
 async def get_system_logs(limit: int = 10):
-    """获取系统日志列表"""
+    """Get the list of system logs."""
     log_files = []
     for entry in os.scandir(LOGS_DIR):
         if entry.is_file() and entry.name.endswith(".log"):
@@ -490,26 +490,26 @@ async def get_system_logs(limit: int = 10):
                     "modified": entry.stat().st_mtime,
                 }
             )
-    # 按修改时间倒序排序并限制数量
+    # Sort by modification time in descending order and limit the number
     log_files.sort(key=lambda x: x["modified"], reverse=True)
     return {"logs": log_files[:limit]}
 
 
 @app.get("/api/logs/{log_name}")
 async def get_log_content(log_name: str, parsed: bool = False):
-    """获取特定日志文件内容"""
+    """Get the content of a specific log file."""
     log_path = LOGS_DIR / log_name
-    # 安全检查
+    # Security check
     if not log_path.exists() or not log_path.is_file():
         raise HTTPException(status_code=404, detail="Log file not found")
 
-    # 如果请求解析后的日志信息
+    # If parsed log information is requested
     if parsed:
         log_info = parse_log_file(str(log_path))
         log_info["name"] = log_name
         return log_info
 
-    # 否则返回原始内容
+    # Otherwise, return the raw content
     with open(log_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -518,15 +518,15 @@ async def get_log_content(log_name: str, parsed: bool = False):
 
 @app.get("/api/logs_parsed")
 async def get_parsed_logs(limit: int = 10):
-    """获取解析后的日志信息列表"""
+    """Get a list of parsed log information."""
     return {"logs": get_all_logs_info(str(LOGS_DIR), limit)}
 
 
 @app.get("/api/logs_parsed/{log_name}")
 async def get_parsed_log(log_name: str):
-    """获取特定日志文件的解析信息"""
+    """Get the parsed information for a specific log file."""
     log_path = LOGS_DIR / log_name
-    # 安全检查
+    # Security check
     if not log_path.exists() or not log_path.is_file():
         raise HTTPException(status_code=404, detail="Log file not found")
 
@@ -537,18 +537,18 @@ async def get_parsed_log(log_name: str):
 
 @app.get("/api/latest_log")
 async def get_latest_log():
-    """获取最新日志文件的解析信息"""
+    """Get the parsed information for the latest log file."""
     return get_latest_log_info(str(LOGS_DIR))
 
 
 @app.get("/api/files/{file_path:path}")
 async def get_file_content(file_path: str):
-    """获取特定文件的内容"""
-    # 安全检查，防止目录遍历攻击
+    """Get the content of a specific file."""
+    # Security check to prevent directory traversal attacks
     root_dir = Path(__file__).parent.parent.parent
     full_path = root_dir / file_path
 
-    # 确保文件在项目目录内
+    # Ensure the file is within the project directory
     try:
         full_path.relative_to(root_dir)
     except ValueError:
@@ -557,12 +557,12 @@ async def get_file_content(file_path: str):
     if not full_path.exists() or not full_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
-    # 读取文件内容
+    # Read file content
     try:
         with open(full_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # 确定文件类型
+        # Determine file type
         file_type = full_path.suffix[1:] if full_path.suffix else "text"
 
         return {
@@ -575,16 +575,16 @@ async def get_file_content(file_path: str):
         raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
 
 
-# 修改process_prompt函数，处理工作区
+# Modify the process_prompt function to handle workspaces
 async def process_prompt(session_id: str, prompt: str):
-    # 获取会话工作区
+    # Get the session workspace
     workspace_dir = None
     if session_id in active_sessions and "workspace" in active_sessions[session_id]:
         workspace_path = active_sessions[session_id]["workspace"]
         workspace_dir = WORKSPACE_ROOT / workspace_path
         os.makedirs(workspace_dir, exist_ok=True)
 
-    # 如果没有工作区，创建一个
+    # If there is no workspace, create one
     if not workspace_dir:
         workspace_dir = create_workspace(session_id)
         if session_id in active_sessions:
@@ -592,22 +592,22 @@ async def process_prompt(session_id: str, prompt: str):
                 workspace_dir.relative_to(WORKSPACE_ROOT)
             )
 
-    # 设置当前工作目录为工作区
+    # Set the current working directory to the workspace
     original_cwd = os.getcwd()
     os.chdir(workspace_dir)
 
-    # 使用工作区名称作为日志文件名前缀
+    # Use the workspace name as the prefix for the log file name
     job_id = workspace_dir.name
-    # 设置日志文件路径
+    # Set the log file path
     task_log_path = LOGS_DIR / f"{job_id}.log"
 
-    # 创建日志监视器并开始监控
+    # Create a log monitor and start monitoring
     log_monitor = LogFileMonitor(job_id)
     observer = log_monitor.start_monitoring()
     active_log_monitors[session_id] = log_monitor
 
     async def sync_logs():
-        """定期从LogFileMonitor获取日志并实时更新到ThinkingTracker"""
+        """Periodically fetch logs from LogFileMonitor and update ThinkingTracker in real-time."""
         last_count = 0
         try:
             while True:
@@ -615,11 +615,11 @@ async def process_prompt(session_id: str, prompt: str):
                     break
                 current_logs = active_log_monitors[session_id].get_log_entries()
                 if len(current_logs) > last_count:
-                    # 处理新的日志条目
+                    # Process new log entries
                     new_logs = current_logs[last_count:]
-                    # 逐条处理每条新日志，确保实时性
+                    # Process each new log entry individually to ensure real-time updates
                     for log_entry in new_logs:
-                        # 单独处理每条日志，立即添加到ThinkingTracker
+                        # Process each log individually, adding it immediately to ThinkingTracker
                         ThinkingTracker.add_log_entry(
                             session_id,
                             {
@@ -629,43 +629,43 @@ async def process_prompt(session_id: str, prompt: str):
                             },
                         )
                     last_count = len(current_logs)
-                # 减少轮询间隔，提高实时性
-                await asyncio.sleep(0.1)  # 每0.1秒检查一次
+                # Reduce polling interval to improve real-time performance
+                await asyncio.sleep(0.1)  # Check every 0.1 seconds
         except Exception as e:
-            print(f"同步日志时发生错误: {str(e)}")
+            print(f"An error occurred while syncing logs: {str(e)}")
 
-    # 启动日志同步任务
+    # Start the log synchronization task
     sync_task = asyncio.create_task(sync_logs())
 
-    # 设置环境变量告知logger使用此日志文件，确保两种方式都设置
+    # Set environment variables to tell the logger to use this log file, ensuring both methods are set
     os.environ["OPENMANUS_LOG_FILE"] = str(task_log_path)
     os.environ["OPENMANUS_TASK_ID"] = job_id
 
     try:
-        # 使用日志捕获上下文管理器解析日志级别和内容
+        # Use the log capture context manager to parse log level and content
         with capture_session_logs(session_id) as log:
-            # 初始化思考跟踪
+            # Initialize thinking tracking
             ThinkingTracker.start_tracking(session_id)
-            ThinkingTracker.add_thinking_step(session_id, "开始处理用户请求")
+            ThinkingTracker.add_thinking_step(session_id, "Starting to process user request")
             ThinkingTracker.add_thinking_step(
-                session_id, f"工作区目录: {workspace_dir.name}"
+                session_id, f"Workspace directory: {workspace_dir.name}"
             )
 
-            # 直接记录用户输入的prompt
-            ThinkingTracker.add_communication(session_id, "用户输入", prompt)
+            # Directly record the user's input prompt
+            ThinkingTracker.add_communication(session_id, "User Input", prompt)
 
-            # 初始化代理和任务流程
-            ThinkingTracker.add_thinking_step(session_id, "初始化AI代理和任务流程")
+            # Initialize the agent and task flow
+            ThinkingTracker.add_thinking_step(session_id, "Initializing AI agent and task flow")
             agent = Manus()
 
-            # 使用包装器包装LLM
+            # Wrap the LLM using the wrapper
             if hasattr(agent, "llm"):
                 original_llm = agent.llm
                 wrapped_llm = LLMCallbackWrapper(original_llm)
 
-                # 注册回调函数
+                # Register callback functions
                 def on_before_request(data):
-                    # 提取请求内容
+                    # Extract request content
                     prompt_content = None
                     if data.get("args") and len(data["args"]) > 0:
                         prompt_content = str(data["args"][0])
@@ -674,18 +674,18 @@ async def process_prompt(session_id: str, prompt: str):
                     else:
                         prompt_content = str(data)
 
-                    # 记录通信内容
-                    print(f"发送到LLM: {prompt_content[:100]}...")
+                    # Record communication content
+                    print(f"Sending to LLM: {prompt_content[:100]}...")
                     ThinkingTracker.add_communication(
-                        session_id, "发送到LLM", prompt_content
+                        session_id, "Sending to LLM", prompt_content
                     )
 
                 def on_after_request(data):
-                    # 提取响应内容
+                    # Extract response content
                     response = data.get("response", "")
                     response_content = ""
 
-                    # 尝试从不同格式中提取文本内容
+                    # Try to extract text content from different formats
                     if isinstance(response, str):
                         response_content = response
                     elif isinstance(response, dict):
@@ -700,17 +700,17 @@ async def process_prompt(session_id: str, prompt: str):
                     else:
                         response_content = str(response)
 
-                    # 记录通信内容
-                    print(f"从LLM接收: {response_content[:100]}...")
+                    # Record communication content
+                    print(f"Receiving from LLM: {response_content[:100]}...")
                     ThinkingTracker.add_communication(
-                        session_id, "从LLM接收", response_content
+                        session_id, "Receiving from LLM", response_content
                     )
 
-                # 注册回调
+                # Register callbacks
                 wrapped_llm.register_callback("before_request", on_before_request)
                 wrapped_llm.register_callback("after_request", on_after_request)
 
-                # 替换原始LLM
+                # Replace the original LLM
                 agent.llm = wrapped_llm
 
             flow = FlowFactory.create_flow(
@@ -718,45 +718,45 @@ async def process_prompt(session_id: str, prompt: str):
                 agents=agent,
             )
 
-            # 记录处理开始
+            # Record the start of processing
             ThinkingTracker.add_thinking_step(
-                session_id, f"分析用户请求: {prompt[:50]}{'...' if len(prompt) > 50 else ''}"
+                session_id, f"Analyzing user request: {prompt[:50]}{'...' if len(prompt) > 50 else ''}"
             )
-            log.info(f"开始执行: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
+            log.info(f"Starting execution: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
 
-            # 检查任务是否被取消
+            # Check if the task has been cancelled
             cancel_event = cancel_events.get(session_id)
             if cancel_event and cancel_event.is_set():
-                log.warning("处理已被用户取消")
+                log.warning("Processing was cancelled by the user")
                 ThinkingTracker.mark_stopped(session_id)
                 active_sessions[session_id]["status"] = "stopped"
-                active_sessions[session_id]["result"] = "处理已被用户停止"
+                active_sessions[session_id]["result"] = "Processing was stopped by the user"
                 return
 
-            # 执行前检查工作区已有文件
+            # Check for existing files in the workspace before execution
             existing_files = set()
             for ext in ["*.txt", "*.md", "*.html", "*.css", "*.js", "*.py", "*.json"]:
                 existing_files.update(f.name for f in workspace_dir.glob(ext))
 
-            # 跟踪计划创建过程
-            ThinkingTracker.add_thinking_step(session_id, "创建任务执行计划")
-            ThinkingTracker.add_thinking_step(session_id, "开始执行任务计划")
+            # Track the plan creation process
+            ThinkingTracker.add_thinking_step(session_id, "Creating task execution plan")
+            ThinkingTracker.add_thinking_step(session_id, "Starting to execute task plan")
 
-            # 获取取消事件以传递给flow.execute
+            # Get the cancellation event to pass to flow.execute
             cancel_event = cancel_events.get(session_id)
 
-            # 初始检查，如果已经取消则不执行
+            # Initial check, do not execute if already cancelled
             if cancel_event and cancel_event.is_set():
-                log.warning("处理已被用户取消")
+                log.warning("Processing was cancelled by the user")
                 ThinkingTracker.mark_stopped(session_id)
                 active_sessions[session_id]["status"] = "stopped"
-                active_sessions[session_id]["result"] = "处理已被用户停止"
+                active_sessions[session_id]["result"] = "Processing was stopped by the user"
                 return
 
-            # 执行实际处理 - 传递job_id和cancel_event给flow.execute方法
+            # Execute the actual processing - pass job_id and cancel_event to the flow.execute method
             result = await flow.execute(prompt, job_id, cancel_event)
 
-            # 执行结束后检查新生成的文件
+            # Check for newly generated files after execution
             new_files = set()
             for ext in ["*.txt", "*.md", "*.html", "*.css", "*.js", "*.py", "*.json"]:
                 new_files.update(f.name for f in workspace_dir.glob(ext))
@@ -766,15 +766,15 @@ async def process_prompt(session_id: str, prompt: str):
                 files_list = ", ".join(newly_created)
                 ThinkingTracker.add_thinking_step(
                     session_id,
-                    f"在工作区 {workspace_dir.name} 中生成了{len(newly_created)}个文件: {files_list}",
+                    f"Generated {len(newly_created)} file(s) in workspace {workspace_dir.name}: {files_list}",
                 )
-                # 将文件列表也添加到会话结果中
+                # Also add the file list to the session result
                 active_sessions[session_id]["generated_files"] = list(newly_created)
 
-            # 记录完成情况
-            log.info("处理完成")
+            # Log completion status
+            log.info("Processing complete")
             ThinkingTracker.add_conclusion(
-                session_id, f"任务处理完成！已在工作区 {workspace_dir.name} 中生成结果。"
+                session_id, f"Task processing complete! Results generated in workspace {workspace_dir.name}."
             )
 
             active_sessions[session_id]["status"] = "completed"
@@ -784,55 +784,55 @@ async def process_prompt(session_id: str, prompt: str):
             ] = ThinkingTracker.get_thinking_steps(session_id)
 
     except asyncio.CancelledError:
-        # 处理取消情况
-        print("处理已取消")
+        # Handle cancellation
+        print("Processing was cancelled")
         ThinkingTracker.mark_stopped(session_id)
         active_sessions[session_id]["status"] = "stopped"
-        active_sessions[session_id]["result"] = "处理已被取消"
+        active_sessions[session_id]["result"] = "Processing was cancelled"
     except Exception as e:
-        # 处理错误情况
-        error_msg = f"处理出错: {str(e)}"
+        # Handle errors
+        error_msg = f"Error during processing: {str(e)}"
         print(error_msg)
-        ThinkingTracker.add_error(session_id, f"处理遇到错误: {str(e)}")
+        ThinkingTracker.add_error(session_id, f"Encountered an error during processing: {str(e)}")
         active_sessions[session_id]["status"] = "error"
-        active_sessions[session_id]["result"] = f"发生错误: {str(e)}"
+        active_sessions[session_id]["result"] = f"An error occurred: {str(e)}"
     finally:
-        # 恢复原始工作目录
+        # Restore the original working directory
         os.chdir(original_cwd)
 
-        # 清除日志文件环境变量
+        # Clear the log file environment variables
         if "OPENMANUS_LOG_FILE" in os.environ:
             del os.environ["OPENMANUS_LOG_FILE"]
         if "OPENMANUS_TASK_ID" in os.environ:
             del os.environ["OPENMANUS_TASK_ID"]
 
-        # 清理资源
+        # Clean up resources
         if (
             "agent" in locals()
             and hasattr(agent, "llm")
             and isinstance(agent.llm, LLMCallbackWrapper)
         ):
             try:
-                # 正确地移除回调
+                # Correctly remove the callbacks
                 if "on_before_request" in locals():
                     agent.llm._callbacks["before_request"].remove(on_before_request)
                 if "on_after_request" in locals():
                     agent.llm._callbacks["after_request"].remove(on_after_request)
             except (ValueError, Exception) as e:
-                print(f"清理回调时出错: {str(e)}")
+                print(f"Error while cleaning up callbacks: {str(e)}")
 
-        # 清理取消事件
+        # Clean up the cancellation event
         if session_id in cancel_events:
             del cancel_events[session_id]
 
-        # 如果监视器存在，停止监控
+        # If the monitor exists, stop monitoring
         if session_id in active_log_monitors:
             observer.stop()
             observer.join(timeout=1)
             del active_log_monitors[session_id]
 
-        # 取消日志同步任务
-        if sync_task:
+        # Cancel the log synchronization task
+        if 'sync_task' in locals() and sync_task:
             sync_task.cancel()
             try:
                 await sync_task
@@ -840,7 +840,7 @@ async def process_prompt(session_id: str, prompt: str):
                 pass
 
 
-# 添加一个新的API端点来获取思考步骤
+# Add a new API endpoint to get thinking steps
 @app.get("/api/thinking/{session_id}")
 async def get_thinking_steps(session_id: str, start_index: int = 0):
     if session_id not in active_sessions:
@@ -852,7 +852,7 @@ async def get_thinking_steps(session_id: str, start_index: int = 0):
     }
 
 
-# 添加获取进度信息的API端点
+# Add an API endpoint to get progress information
 @app.get("/api/progress/{session_id}")
 async def get_progress(session_id: str):
     if session_id not in active_sessions:
@@ -861,10 +861,10 @@ async def get_progress(session_id: str):
     return ThinkingTracker.get_progress(session_id)
 
 
-# 添加API端点获取指定会话的系统日志
+# Add an API endpoint to get system logs for a specific session
 @app.get("/api/systemlogs/{session_id}")
-async def get_system_logs(session_id: str):
-    """获取指定会话的系统日志"""
+async def get_system_logs_for_session(session_id: str):
+    """Get the system logs for a specific session."""
     if session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -876,12 +876,12 @@ async def get_system_logs(session_id: str):
     if not job_id:
         return {"logs": []}
 
-    # 如果有监控器使用监控器
+    # Use the monitor if it exists
     if session_id in active_log_monitors:
         logs = active_log_monitors[session_id].get_log_entries()
         return {"logs": logs}
 
-    # 否则直接读取日志文件
+    # Otherwise, read the log file directly
     log_path = LOGS_DIR / f"{job_id}.log"
     if not log_path.exists():
         return {"logs": []}
